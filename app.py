@@ -392,7 +392,7 @@ if ms is not None:
 # =============================================================================
 # TABS
 # =============================================================================
-tab_names = ["🏠 Ringkasan", "📉 Ramalan vs Kenyataan", "🔍 Faktor yang Berpengaruh", "🚀 Ramalan Langsung"]
+tab_names = ["🏠 Ringkasan", "📉 Ramalan vs Kenyataan", "🔍 Variabel yang Berpengaruh", "🚀 Ramalan Langsung"]
 if show_eval:
     tab_names.insert(3, "🏆 Evaluasi Model")
 tabs = dict(zip(tab_names, st.tabs(tab_names)))
@@ -471,7 +471,7 @@ with tabs["🏠 Ringkasan"]:
                                "text/csv")
             insight(f"Siapkan tambahan pasokan sebelum pukul <b>{FUT.datetime.iloc[ri]:%H:%M}</b>, saat beban naik paling cepat.")
 
-    # ---------- peringkat · faktor · normal vs covid ----------
+    # ---------- peringkat · variabel · normal vs covid ----------
     c1, c2, c3 = st.columns(3)
     with c1:
         with card(610):
@@ -491,7 +491,7 @@ with tabs["🏠 Ringkasan"]:
                     f"<b>{fmt(r0.MAPE, 2)}%</b>, atau sekitar ±{fmt(r0.MAE, 0)} MWh setiap jam.")
     with c2:
         with card(610):
-            head("🧩 Apa yang menentukan ramalan?", "Porsi pengaruh tiap kelompok faktor")
+            head("🧩 Apa yang menentukan ramalan?", "Porsi pengaruh tiap kelompok variabel")
             if B["grp"] is not None:
                 g = B["grp"].sort_values("kontribusi_pct", ascending=False).reset_index(drop=True)
                 labels = [nice_group(k) for k in g.kelompok]
@@ -503,14 +503,14 @@ with tabs["🏠 Ringkasan"]:
                                        textfont=dict(color="#fff", size=12),
                                        hovertemplate="%{label}<br>%{value:.1f}%<extra></extra>", domain=dict(x=[0.1, 0.9], y=[0, 1])))
                 fig.update_layout(annotations=[dict(text=f"<b>{g.kontribusi_pct.iloc[0]:.0f}%</b><br><span style='font-size:11px'>"
-                                                         f"faktor utama</span>", x=0.5, y=0.5, showarrow=False,
+                                                         f"variabel utama</span>", x=0.5, y=0.5, showarrow=False,
                                                     font=dict(size=20, color=INK))])
                 show(style(fig, 250, legend=False, unified=False).update_layout(margin=dict(l=0, r=0, t=6, b=6)), "donut")
                 st.markdown(legend_html(list(zip([f"{l} ({v:.1f}%)" for l, v in zip(labels, g.kontribusi_pct)], cols))[:6]),
                             unsafe_allow_html=True)
                 gx = g[g.kelompok.isin(["Suhu", "Kelembapan", "Presipitasi", "Angin", "Libur & sekolah"])]
                 insight(f"Ramalan paling banyak ditentukan oleh <b>{nice_group(g.kelompok.iloc[0]).lower()}</b> "
-                        f"({g.kontribusi_pct.iloc[0]:.0f}%). Dari faktor luar, yang paling berpengaruh adalah "
+                        f"({g.kontribusi_pct.iloc[0]:.0f}%). Dari variabel luar, yang paling berpengaruh adalah "
                         f"<b>{nice_group(gx.kelompok.iloc[0]).lower() if len(gx) else '-'}</b>.")
     with c3:
         with card(610):
@@ -670,15 +670,15 @@ with tabs["📉 Ramalan vs Kenyataan"]:
 # =============================================================================
 # FAKTOR YANG BERPENGARUH
 # =============================================================================
-with tabs["🔍 Faktor yang Berpengaruh"]:
+with tabs["🔍 Variabel yang Berpengaruh"]:
     if B["feat"] is None:
         st.warning("File pengaruh_fitur.csv tidak ada pada hasil Kaggle.")
     else:
         FT, GR = B["feat"].copy(), B["grp"].copy()
         st.markdown(f'<div class="sum"><h4>🔍 Cara membaca</h4><ul><li>Pengaruh dihitung dari model <b>{M.get("imp_model")}</b>: '
-                    f'seberapa besar ramalan memburuk jika suatu faktor "disembunyikan" dari model.</li>'
+                    f'seberapa besar ramalan memburuk jika suatu variabel "disembunyikan" dari model.</li>'
                     f'<li><b>Pola beban hari-hari sebelumnya</b> wajar paling dominan karena pemakaian listrik sangat berulang. '
-                    f'Untuk melihat faktor luar (cuaca, libur), aktifkan <b>"hanya faktor luar"</b>.</li></ul></div>',
+                    f'Untuk melihat variabel luar (cuaca, libur), aktifkan <b>"hanya variabel luar"</b>.</li></ul></div>',
                     unsafe_allow_html=True)
         with st.expander("📖 Kamus variabel — arti setiap kolom pada data", expanded=False):
             st.dataframe(kamus_df(), hide_index=True)
@@ -687,7 +687,7 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
         c1, c2 = st.columns(2)
         with c1:
             with card(560):
-                head("📦 Kelompok faktor paling penting", "Tambahan kesalahan (MWh) jika kelompok ini disembunyikan")
+                head("📦 Kelompok variabel paling penting", "Tambahan kesalahan (MWh) jika kelompok ini disembunyikan")
                 G2 = GR.sort_values("kenaikan_mae_perm")
                 cols = [RAMP[min(i, len(RAMP) - 1)] for i in range(len(G2))][::-1]
                 fig = go.Figure(go.Bar(x=G2.kenaikan_mae_perm, y=[nice_group(k) for k in G2.kelompok], orientation="h",
@@ -699,16 +699,16 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                 top = GR.sort_values("kenaikan_mae_perm", ascending=False)
                 ext = top[~top.kelompok.isin(["Riwayat beban (lag)", "Kalender (jam/hari/musim)", "Rezim COVID-19"])]
                 insight(f"Tanpa informasi <b>{nice_group(top.kelompok.iloc[0]).lower()}</b>, ramalan meleset {fmt(top.kenaikan_mae_perm.iloc[0], 0)} MWh "
-                        f"lebih jauh. Dari faktor luar, <b>{nice_group(ext.kelompok.iloc[0]).lower() if len(ext) else '-'}</b> "
+                        f"lebih jauh. Dari variabel luar, <b>{nice_group(ext.kelompok.iloc[0]).lower() if len(ext) else '-'}</b> "
                         f"paling penting.")
         with c2:
             with card(560):
                 cc1, cc2 = st.columns([1, 1])
-                only_ex = cc1.toggle("Hanya faktor luar", value=True)
-                n_top = cc2.slider("Jumlah faktor", 5, min(25, len(FT)), 10)
+                only_ex = cc1.toggle("Hanya variabel luar", value=True)
+                n_top = cc2.slider("Jumlah variabel", 5, min(25, len(FT)), 10)
                 F2 = FT[FT.kelompok != "Riwayat beban (lag)"] if only_ex else FT
                 F2 = F2.sort_values("nilai", ascending=False).head(n_top).iloc[::-1]
-                head("🏅 Faktor satu per satu", "Makin panjang batang, makin besar pengaruhnya")
+                head("🏅 Variabel satu per satu", "Makin panjang batang, makin besar pengaruhnya")
                 fig = go.Figure(go.Bar(x=F2.nilai, y=[nice_feat(f) for f in F2.fitur], orientation="h",
                                        marker=dict(color=F2.nilai, colorscale=SEQ[1:], line=dict(color="#fff", width=1)),
                                        customdata=[nice_group(k) for k in F2.kelompok],
@@ -716,7 +716,7 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                 fig.update_layout(margin=dict(l=10, r=16, t=8, b=30))
                 fig.update_xaxes(showticklabels=False)
                 show(style(fig, 360, legend=False, unified=False), "feat")
-                insight(f"Faktor tunggal paling berpengaruh: <b>{nice_feat(F2.fitur.iloc[-1])}</b>.")
+                insight(f"Variabel tunggal paling berpengaruh: <b>{nice_feat(F2.fitur.iloc[-1])}</b>.")
 
         if B["hfeat"] is not None:
             with st.container(border=True):
@@ -755,7 +755,7 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                         f"<b>{fmt(slope, 0)} MWh</b>, karena pemakaian pendingin ruangan (AC) bertambah.")
         with c2:
             with card(560):
-                head("🔗 Seberapa erat hubungan tiap faktor dengan beban?", "−1 = berlawanan · 0 = tidak berhubungan · +1 = searah")
+                head("🔗 Seberapa erat hubungan tiap variabel dengan beban?", "−1 = berlawanan · 0 = tidak berhubungan · +1 = searah")
                 if B["corr"] is not None:
                     C = B["corr"].sort_values("Pearson", key=abs).tail(10)
                     fig = go.Figure(go.Bar(x=C.Pearson, y=[nice_feat(v) for v in C.variabel], orientation="h",
