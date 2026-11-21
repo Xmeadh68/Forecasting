@@ -38,8 +38,29 @@ GROUP_NAME = {"Riwayat beban (lag)": "Pola beban hari-hari sebelumnya", "Kalende
               "Libur & sekolah": "Hari libur & masa sekolah", "Suhu": "Suhu udara", "Kelembapan": "Kelembapan udara",
               "Presipitasi": "Curah hujan", "Angin": "Kecepatan angin", "Rezim COVID-19": "Masa COVID-19",
               "Ramalan foundation model": "Ramalan model transfer learning"}
-CITY = {"toc": "Kota Panama", "san": "Santiago", "dav": "David"}
-VARN = {"T2M": "Suhu", "QV2M": "Kelembapan", "TQL": "Curah hujan", "W2M": "Kecepatan angin"}
+CITY = {"toc": "Tocumen (Kota Panama)", "san": "Kota Santiago", "dav": "Kota David"}
+VARN = {"T2M": "Suhu udara", "QV2M": "Kelembapan udara", "TQL": "Curah hujan", "W2M": "Kecepatan angin"}
+UNIT = {"T2M": "°C", "QV2M": "%", "TQL": "l/m²", "W2M": "m/s"}
+# Kamus variabel data asli (mengikuti lembar 'deskripsi' pada file Excel)
+COL_DESC = {"datetime": ("Tanggal dan jam pencatatan (zona waktu Panama, UTC−5)", "tanggal-jam"),
+            "nat_demand": ("Beban (kebutuhan) listrik nasional Panama — yang diramal", "MWh"),
+            "Holiday_ID": ("Kode jenis hari libur nasional (0 = bukan hari libur)", "kode"),
+            "holiday": ("Penanda hari libur (1 = hari libur, 0 = hari biasa)", "ya/tidak"),
+            "school": ("Penanda masa sekolah (1 = masa sekolah, 0 = libur sekolah)", "ya/tidak")}
+for _v, _vn in VARN.items():
+    for _c, _cn in CITY.items():
+        COL_DESC[f"{_v}_{_c}"] = (f"{_vn} di {_cn}" + (" (ketinggian 2 meter)" if _v in ("T2M", "QV2M", "W2M") else ""), UNIT[_v])
+
+
+def col_label(c):
+    """Nama kolom data dalam bahasa manusia, untuk pilihan kolom."""
+    return f"{COL_DESC[c][0]} [{c}]" if c in COL_DESC else str(c)
+
+
+def kamus_df():
+    return pd.DataFrame([dict(**{"Nama di data": k, "Arti": v[0], "Satuan": v[1]}) for k, v in COL_DESC.items()])
+
+
 FEAT_NAME = {"hour": "Jam", "dow": "Hari dalam seminggu", "month": "Bulan", "doy_sin": "Musim dalam setahun",
              "doy_cos": "Musim dalam setahun (2)", "weekend": "Akhir pekan", "horizon": "Jarak jam dari saat meramal",
              "Holiday_ID": "Jenis hari libur", "holiday": "Hari libur", "school": "Masa sekolah", "covid": "Masa COVID-19",
@@ -59,7 +80,9 @@ def nice_feat(f):
         return FEAT_NAME[f]
     p = str(f).split("_")
     if len(p) == 2 and p[0] in VARN and p[1] in CITY:
-        return f"{VARN[p[0]]} {CITY[p[1]]}"
+        return f"{VARN[p[0]]} di {CITY[p[1]]}"
+    if f == "nat_demand":
+        return "Beban listrik nasional"
     return str(f)
 
 
@@ -165,6 +188,16 @@ def show(fig, key):
         st.plotly_chart(fig, width="stretch", config=cfg, key=key)
     except Exception:
         st.plotly_chart(fig, use_container_width=True, config=cfg, key=key)
+
+
+def card(h=None):
+    """Kartu berbingkai dengan tinggi seragam (jika didukung versi Streamlit)."""
+    if h:
+        try:
+            return st.container(border=True, height=h)
+        except TypeError:
+            pass
+    return st.container(border=True)
 
 
 def head(t, s=""):
@@ -395,7 +428,7 @@ with tabs["🏠 Ringkasan"]:
     # ---------- ramalan besok + jam kritis ----------
     c1, c2 = st.columns([2.35, 1])
     with c1:
-        with st.container(border=True):
+        with card(560):
             head("⚡ Ramalan kebutuhan listrik 24 jam ke depan",
                  f"{short(sel_model)} · area biru muda = rentang kemungkinan (80% yakin nilai sebenarnya ada di sini)")
             hist = y_all.loc[LAST - pd.Timedelta(hours=71):LAST]
@@ -419,7 +452,7 @@ with tabs["🏠 Ringkasan"]:
                     f"({fmt(pk.prediksi, 0)} MWh). Total kebutuhan sehari <b>{'lebih tinggi' if dlw > 0 else 'lebih rendah'} "
                     f"{fmt(abs(dlw), 1)}%</b> dibanding hari yang sama minggu lalu.")
     with c2:
-        with st.container(border=True):
+        with card(560):
             head("⏰ Jam-jam penting besok", "Bekal untuk mengatur pembangkit")
             ramp = np.diff(np.r_[y_all.loc[LAST], FUT.prediksi.values])
             ri = int(np.argmax(ramp))
@@ -439,9 +472,9 @@ with tabs["🏠 Ringkasan"]:
             insight(f"Siapkan tambahan pasokan sebelum pukul <b>{FUT.datetime.iloc[ri]:%H:%M}</b>, saat beban naik paling cepat.")
 
     # ---------- peringkat · faktor · normal vs covid ----------
-    c1, c2, c3 = st.columns([1.15, 1.05, 1.1])
+    c1, c2, c3 = st.columns(3)
     with c1:
-        with st.container(border=True):
+        with card(610):
             head("🏆 Model paling tepat", "Rata-rata meleset (%) · makin pendek makin bagus")
             T = SC.head(8).iloc[::-1]
             fig = go.Figure(go.Bar(x=T.MAPE, y=[short(n) + (" ⚠️" if n in SUSPECT else "") for n in T.Model], orientation="h",
@@ -457,7 +490,7 @@ with tabs["🏠 Ringkasan"]:
             insight(f"<b>{short(r0.Model)}</b> paling tepat pada periode ini: ramalannya rata-rata hanya meleset "
                     f"<b>{fmt(r0.MAPE, 2)}%</b>, atau sekitar ±{fmt(r0.MAE, 0)} MWh setiap jam.")
     with c2:
-        with st.container(border=True):
+        with card(610):
             head("🧩 Apa yang menentukan ramalan?", "Porsi pengaruh tiap kelompok faktor")
             if B["grp"] is not None:
                 g = B["grp"].sort_values("kontribusi_pct", ascending=False).reset_index(drop=True)
@@ -480,7 +513,7 @@ with tabs["🏠 Ringkasan"]:
                         f"({g.kontribusi_pct.iloc[0]:.0f}%). Dari faktor luar, yang paling berpengaruh adalah "
                         f"<b>{nice_group(gx.kelompok.iloc[0]).lower() if len(gx) else '-'}</b>.")
     with c3:
-        with st.container(border=True):
+        with card(610):
             head("🦠 Saat normal vs masa COVID-19", "Rata-rata meleset (%) · 6 model teratas")
             lbn = LB.dropna(subset=["MAPE_NORMAL", "MAPE_COVID"]) if "MAPE_COVID" in LB else pd.DataFrame()
             if len(lbn):
@@ -523,7 +556,7 @@ with tabs["🏠 Ringkasan"]:
 
     c1, c2 = st.columns(2)
     with c1:
-        with st.container(border=True):
+        with card(470):
             head("🗓️ Kapan listrik paling banyak dipakai?", "Rata-rata beban per hari dan jam")
             pv = DATA.assign(h=DATA.index.hour, d=DATA.index.dayofweek).pivot_table(index="d", columns="h", values="nat_demand")
             fig = go.Figure(go.Heatmap(z=pv.values, x=[f"{h:02d}" for h in pv.columns], y=[HARI[i] for i in pv.index],
@@ -537,7 +570,7 @@ with tabs["🏠 Ringkasan"]:
                     f"terendah hari <b>{HARI[pv.index[mn[0]]]} pukul {pv.columns[mn[1]]:02d}:00</b>. "
                     f"Akhir pekan jelas lebih rendah dari hari kerja.")
     with c2:
-        with st.container(border=True):
+        with card(470):
             head("🏖️ Pola sehari: hari kerja, akhir pekan, dan hari libur", "Rata-rata beban tiap jam")
             prof = DATA.assign(h=DATA.index.hour, tipe=np.where(DATA.holiday == 1, "Hari libur",
                                                                 np.where(DATA.index.dayofweek >= 5, "Akhir pekan", "Hari kerja")))
@@ -579,7 +612,7 @@ with tabs["📉 Ramalan vs Kenyataan"]:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        with st.container(border=True):
+        with card(460):
             head("🎯 Seberapa dekat dengan kenyataan?", "Tiap titik = 1 jam · titik di garis putus = tepat")
             smp = G.sample(min(3000, len(G)), random_state=1)
             lo_, hi_ = float(np.nanmin(smp.aktual)), float(np.nanmax(smp.aktual))
@@ -590,7 +623,7 @@ with tabs["📉 Ramalan vs Kenyataan"]:
             show(style(fig, 290, legend=False, unified=False).update_xaxes(title="Kenyataan (MWh)").update_yaxes(title="Ramalan (MWh)"), "sc")
             insight("Makin rapat titik-titik ke garis putus-putus, makin tepat ramalannya.")
     with c2:
-        with st.container(border=True):
+        with card(460):
             head("📊 Sebaran kesalahan", "Kanan nol = ramalan terlalu rendah, kiri nol = terlalu tinggi")
             fig = go.Figure(go.Histogram(x=G.galat, nbinsx=60, marker=dict(color="#3f8ae0", line=dict(color="#fff", width=1)),
                                          hovertemplate="selisih %{x}<br>%{y} jam<extra></extra>"))
@@ -599,7 +632,7 @@ with tabs["📉 Ramalan vs Kenyataan"]:
             q = np.nanpercentile(G.galat.abs(), 90)
             insight(f"9 dari 10 jam, selisih ramalan tidak lebih dari <b>±{fmt(q, 0)} MWh</b>.")
     with c3:
-        with st.container(border=True):
+        with card(460):
             head("📅 Hari apa paling sulit diramal?", "Rata-rata meleset (%) per hari")
             dw = G.assign(d=G.datetime.dt.dayofweek).groupby("d").ape.mean().reindex(range(7))
             cols = [RAMP[i] for i in pd.Series(dw.values).rank(ascending=False, method="first").fillna(7).astype(int).clip(1, 7).values - 1]
@@ -647,9 +680,13 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                     f'<li><b>Pola beban hari-hari sebelumnya</b> wajar paling dominan karena pemakaian listrik sangat berulang. '
                     f'Untuk melihat faktor luar (cuaca, libur), aktifkan <b>"hanya faktor luar"</b>.</li></ul></div>',
                     unsafe_allow_html=True)
-        c1, c2 = st.columns([1, 1.2])
+        with st.expander("📖 Kamus variabel — arti setiap kolom pada data", expanded=False):
+            st.dataframe(kamus_df(), hide_index=True)
+            st.caption("Data cuaca diukur di tiga kota: Tocumen (bandara Kota Panama), Santiago, dan David. "
+                       "Variabel turunan seperti 'Beban 1 hari sebelumnya' dibuat dari kolom beban listrik nasional.")
+        c1, c2 = st.columns(2)
         with c1:
-            with st.container(border=True):
+            with card(560):
                 head("📦 Kelompok faktor paling penting", "Tambahan kesalahan (MWh) jika kelompok ini disembunyikan")
                 G2 = GR.sort_values("kenaikan_mae_perm")
                 cols = [RAMP[min(i, len(RAMP) - 1)] for i in range(len(G2))][::-1]
@@ -665,7 +702,7 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                         f"lebih jauh. Dari faktor luar, <b>{nice_group(ext.kelompok.iloc[0]).lower() if len(ext) else '-'}</b> "
                         f"paling penting.")
         with c2:
-            with st.container(border=True):
+            with card(560):
                 cc1, cc2 = st.columns([1, 1])
                 only_ex = cc1.toggle("Hanya faktor luar", value=True)
                 n_top = cc2.slider("Jumlah faktor", 5, min(25, len(FT)), 10)
@@ -678,7 +715,7 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                                        hovertemplate="<b>%{y}</b><br>%{customdata}<extra></extra>"))
                 fig.update_layout(margin=dict(l=10, r=16, t=8, b=30))
                 fig.update_xaxes(showticklabels=False)
-                show(style(fig, max(290, 27 * len(F2)), legend=False, unified=False), "feat")
+                show(style(fig, 360, legend=False, unified=False), "feat")
                 insight(f"Faktor tunggal paling berpengaruh: <b>{nice_feat(F2.fitur.iloc[-1])}</b>.")
 
         if B["hfeat"] is not None:
@@ -698,10 +735,10 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                         f"<b>{nice_feat(hx.fitur.iloc[0]) if len(hx) else '-'}</b> dan "
                         f"<b>{nice_feat(hx.fitur.iloc[1]) if len(hx) > 1 else '-'}</b>.")
 
-        c1, c2 = st.columns([1.2, 1])
+        c1, c2 = st.columns(2)
         with c1:
-            with st.container(border=True):
-                city = st.selectbox("Kota", list(CITY), format_func=lambda k: CITY[k], key="effcity")
+            with card(560):
+                city = st.selectbox("Lokasi pengukuran suhu", list(CITY), format_func=lambda k: CITY[k], key="effcity")
                 head(f"🌡️ Makin panas, makin banyak listrik dipakai? ({CITY[city]})",
                      "Rata-rata beban pada tiap suhu, dipisah siang (08–18) dan malam")
                 X = DATA.assign(tb=(DATA[f"T2M_{city}"] * 2).round() / 2,
@@ -711,13 +748,13 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                 fig = go.Figure([go.Scatter(x=E[E.w == w].tb, y=E[E.w == w]["mean"], name=w, mode="lines+markers",
                                             line=dict(color=c, width=2.6), marker=dict(size=6), hovertemplate="%{y:,.0f} MWh")
                                  for w, c in [("Siang", BLUE), ("Malam", TEAL)]])
-                show(style(fig, 320).update_xaxes(title="Suhu (°C)").update_yaxes(title="Rata-rata beban (MWh)"), "effT")
+                show(style(fig, 330).update_xaxes(title="Suhu (°C)").update_yaxes(title="Rata-rata beban (MWh)"), "effT")
                 Es = E[E.w == "Siang"]
                 slope = np.polyfit(Es.tb, Es["mean"], 1)[0] if len(Es) > 3 else np.nan
                 insight(f"Di siang hari, setiap kenaikan suhu <b>1°C</b> diikuti kenaikan beban sekitar "
                         f"<b>{fmt(slope, 0)} MWh</b>, karena pemakaian pendingin ruangan (AC) bertambah.")
         with c2:
-            with st.container(border=True):
+            with card(560):
                 head("🔗 Seberapa erat hubungan tiap faktor dengan beban?", "−1 = berlawanan · 0 = tidak berhubungan · +1 = searah")
                 if B["corr"] is not None:
                     C = B["corr"].sort_values("Pearson", key=abs).tail(10)
@@ -727,7 +764,7 @@ with tabs["🔍 Faktor yang Berpengaruh"]:
                                            text=[f"{v:+.2f}" for v in C.Pearson], textposition="outside", cliponaxis=False,
                                            hovertemplate="%{y}: %{x:+.2f}<extra></extra>"))
                     fig.update_layout(margin=dict(l=10, r=40, t=8, b=30))
-                    show(style(fig, 360, legend=False, unified=False).update_xaxes(range=[-1, 1]), "corr")
+                    show(style(fig, 400, legend=False, unified=False).update_xaxes(range=[-1, 1]), "corr")
                     c0 = B["corr"].iloc[B["corr"].Pearson.abs().argmax()]
                     insight(f"<b>{nice_feat(c0.variabel)}</b> paling erat hubungannya dengan beban listrik "
                             f"(korelasi {c0.Pearson:+.2f}).")
@@ -750,7 +787,7 @@ if show_eval:
         else:
             c1, c2 = st.columns(2)
             with c1:
-                with st.container(border=True):
+                with card(580):
                     head(f"Perbandingan {met} semua model", "Periode sesuai filter di atas")
                     T = S2.sort_values(met).iloc[::-1]
                     fig = go.Figure(go.Bar(x=T[met], y=[short(n) + (" ⚠️" if n in SUSPECT else "") for n in T.Model], orientation="h",
@@ -759,10 +796,10 @@ if show_eval:
                                            text=[f"{v:.2f}" for v in T[met]], textposition="outside", cliponaxis=False,
                                            hovertemplate="<b>%{y}</b><br>%{x:.2f}<extra></extra>"))
                     fig.update_layout(margin=dict(l=10, r=46, t=8, b=30))
-                    show(style(fig, max(320, 32 * len(T)), legend=False, unified=False).update_xaxes(title=met), "cmp")
+                    show(style(fig, 400, legend=False, unified=False).update_xaxes(title=met), "cmp")
                     st.markdown(legend_html([(FAM_ID[k], c) for k, c in FAM.items() if k in set(T.Keluarga)]), unsafe_allow_html=True)
             with c2:
-                with st.container(border=True):
+                with card(580):
                     head("Kesalahan menurut jarak waktu ramalan", "Jam ke-1 s.d. ke-24 setelah ramalan dibuat · 6 model teratas")
                     fig = go.Figure()
                     for n in S2.Model[:6]:
@@ -770,12 +807,12 @@ if show_eval:
                         fig.add_trace(go.Scatter(x=g.index, y=g.values, name=short(n), mode="lines",
                                                  line=dict(color=fam_color(n), width=3 if n == sel_model else 1.8,
                                                            dash=None if n == sel_model else "dot"), hovertemplate="%{y:.1f} MWh"))
-                    show(style(fig, max(320, 32 * len(S2))).update_xaxes(title="jam ke-", dtick=2).update_yaxes(title="selisih (MWh)"), "hz")
+                    show(style(fig, 400).update_xaxes(title="jam ke-", dtick=2).update_yaxes(title="selisih (MWh)"), "hz")
                     insight("Makin jauh jam yang diramal dari tengah malam, biasanya makin besar kesalahannya.")
 
-            c1, c2 = st.columns([1.2, 1])
+            c1, c2 = st.columns(2)
             with c1:
-                with st.container(border=True):
+                with card(560):
                     head("Cek kebocoran data (model transfer learning)",
                          "Model jujur memburuk di hari libur & awal lockdown (12–28 Mar 2020) karena tidak punya info itu")
                     CK = B["cek"]
@@ -789,11 +826,11 @@ if show_eval:
                                                              ("Hari libur", "MAPE_hari_libur", "#3f8ae0"),
                                                              ("Awal lockdown", "MAPE_awal_lockdown", TEAL)]])
                         fig.update_layout(barmode="group", bargap=0.25, margin=dict(l=10, r=14, t=40, b=30))
-                        show(style(fig, max(340, 34 * len(CK)), unified=False).update_xaxes(title="meleset (%)"), "cek")
+                        show(style(fig, 380, unified=False).update_xaxes(title="meleset (%)"), "cek")
                         insight("⚠️ = diduga bocor: tetap sangat tepat saat lockdown padahal tidak diberi informasi apa pun "
                                 "tentang COVID-19, dan jauh lebih tepat dari semua model lain.")
             with c2:
-                with st.container(border=True):
+                with card(560):
                     hb = M.get("hybrid_base")
                     head("Hybrid dibanding model dasarnya", f"Model dasar: {short(hb) if hb else '–'}")
                     names = ([hb] if hb in set(LB.Model) else []) + list(LB[LB.Keluarga == "Hybrid"].Model)
@@ -807,7 +844,7 @@ if show_eval:
                                          for k, c, col in [("Seluruh uji", "TEST_MAPE", INDIGO), ("Normal", "MAPE_NORMAL", BLUE),
                                                            ("Masa COVID-19", "MAPE_COVID", TEAL)] if c in T])
                         fig.update_layout(barmode="group", bargap=0.25)
-                        show(style(fig, 340, unified=False).update_yaxes(title="meleset (%)"), "hybcmp")
+                        show(style(fig, 380, unified=False).update_yaxes(title="meleset (%)"), "hybcmp")
                         insight("Batang lebih pendek dari model dasar berarti penggabungan berhasil mengurangi kesalahan.")
 
             with st.container(border=True):
@@ -910,8 +947,9 @@ with tabs["🚀 Ramalan Langsung"]:
                 t_guess = next((c for c in cols if any(k in str(c).lower() for k in ("date", "time", "tanggal", "waktu"))), cols[0])
                 num = [c for c in cols if pd.api.types.is_numeric_dtype(raw_df[c])]
                 y_guess = "nat_demand" if "nat_demand" in cols else (num[0] if num else cols[-1])
-                tcol = st.selectbox("Kolom waktu", cols, index=cols.index(t_guess))
-                ycol = st.selectbox("Kolom beban", cols, index=cols.index(y_guess))
+                tcol = st.selectbox("Kolom tanggal & jam", cols, index=cols.index(t_guess), format_func=col_label)
+                ycol = st.selectbox("Kolom yang ingin diramal", cols, index=cols.index(y_guess), format_func=col_label,
+                                    help="Biasanya 'Beban listrik nasional (nat_demand)'. Kolom lain seperti suhu juga bisa diramal.")
             mlabel = st.selectbox("Model", list(CHRONOS), index=2)
             h = int(st.number_input("Berapa langkah ke depan?", 1, 168, 24, help="Paling tepat sampai 64 langkah"))
             ctx_len = st.select_slider("Berapa banyak data lampau dipakai?", [168, 336, 512, 1024, 2048], value=2048)
@@ -943,9 +981,12 @@ with tabs["🚀 Ramalan Langsung"]:
         R = st.session_state.get("live")
         if R is None:
             with st.container(border=True):
-                head("Belum ada ramalan", "Pilih data lalu klik 'Ramalkan sekarang'. Contoh format file:")
-                st.dataframe(pd.DataFrame({"datetime": ["2020-06-26 01:00", "2020-06-26 02:00", "…"],
-                                           "nat_demand": [1012.5, 978.1, None]}), hide_index=True)
+                head("Belum ada ramalan", "Pilih data lalu klik 'Ramalkan sekarang'. Contoh isi file yang bisa diunggah:")
+                st.dataframe(pd.DataFrame({"datetime (tanggal & jam)": ["2020-06-26 01:00", "2020-06-26 02:00", "…"],
+                                           "nat_demand (beban listrik nasional, MWh)": [1012.5, 978.1, None]}), hide_index=True)
+                st.caption("Nama kolom boleh berbeda — Anda bisa memilih kolomnya di panel pengaturan.")
+            with st.expander("📖 Kamus variabel data contoh", expanded=False):
+                st.dataframe(kamus_df(), hide_index=True)
         else:
             pk_i = int(np.argmax(R["med"]))
             items = [("🤖", "Model", R["used"], f"jarak data {pd.Timedelta(R['step'])}", "hl"),
@@ -976,7 +1017,7 @@ with tabs["🚀 Ramalan Langsung"]:
                 fig.add_trace(go.Scatter(x=R["fidx"], y=R["med"], name="Ramalan", mode="lines+markers", marker=dict(size=5),
                                          line=dict(color=BLUE, width=3), hovertemplate="%{y:,.1f}"))
                 fig.add_vline(x=R["s"].index[-1], line=dict(color=MUTED, dash="dash"))
-                show(style(fig, 420).update_yaxes(title=str(R["ycol"])), "live")
+                show(style(fig, 420).update_yaxes(title=COL_DESC.get(R["ycol"], (str(R["ycol"]),))[0][:40]), "live")
                 out = pd.DataFrame({"waktu": R["fidx"], "ramalan": R["med"], "batas_bawah": R["lo"], "batas_atas": R["hi"]})
                 if R["actual"] is not None:
                     out["kenyataan"] = R["actual"].values
