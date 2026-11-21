@@ -229,9 +229,34 @@ def load_bundle(folder):
 
 
 NEEDED = ["meta.json", "leaderboard_model.csv", "prediksi_model.csv.gz", "data_historis.csv.gz"]
+
+
+def find_data_dir():
+    """Cari hasil Kaggle di: folder hasil_kaggle/, akar repo, atau di dalam hasil_kaggle.zip."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in [DATA_DIR, here]:
+        if all(os.path.exists(os.path.join(d, f)) for f in NEEDED):
+            return d
+    for zp in [os.path.join(here, "hasil_kaggle.zip"), os.path.join(DATA_DIR, "hasil_kaggle.zip")]:
+        if os.path.exists(zp):
+            import tempfile
+            import zipfile
+            out = os.path.join(tempfile.gettempdir(), "hasil_kaggle_unzip")
+            os.makedirs(out, exist_ok=True)
+            with zipfile.ZipFile(zp) as z:
+                for n in z.namelist():
+                    if not n.endswith("/"):
+                        with open(os.path.join(out, os.path.basename(n)), "wb") as fh:
+                            fh.write(z.read(n))
+            if all(os.path.exists(os.path.join(out, f)) for f in NEEDED):
+                return out
+    return None
+
+
 B = None
-if os.path.isdir(DATA_DIR) and all(os.path.exists(os.path.join(DATA_DIR, f)) for f in NEEDED):
-    B = load_bundle(DATA_DIR)
+_dir = find_data_dir()
+if _dir is not None:
+    B = load_bundle(_dir)
 
 with st.sidebar:
     st.markdown("### ⚙️ Pengaturan tampilan")
@@ -244,7 +269,8 @@ with st.sidebar:
                "20% uji (400 hari), diramal ulang setiap tengah malam.")
 
 if B is None:
-    st.error("Folder **hasil_kaggle/** belum lengkap di repo. Pastikan file berikut ada: " + ", ".join(NEEDED))
+    st.error("Hasil Kaggle tidak ditemukan. Letakkan file berikut di folder **hasil_kaggle/**, di akar repo, "
+             "atau upload **hasil_kaggle.zip**: " + ", ".join(NEEDED))
     st.stop()
 
 M, LB, PRED, DATA = B["meta"], B["leader"], B["pred"], B["data"]
