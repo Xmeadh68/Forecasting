@@ -947,9 +947,9 @@ with tabs["🚀 Ramalan Langsung"]:
                 t_guess = next((c for c in cols if any(k in str(c).lower() for k in ("date", "time", "tanggal", "waktu"))), cols[0])
                 num = [c for c in cols if pd.api.types.is_numeric_dtype(raw_df[c])]
                 y_guess = "nat_demand" if "nat_demand" in cols else (num[0] if num else cols[-1])
-                tcol = st.selectbox("Kolom tanggal & jam", cols, index=cols.index(t_guess), format_func=col_label)
-                ycol = st.selectbox("Kolom yang ingin diramal", cols, index=cols.index(y_guess), format_func=col_label,
-                                    help="Biasanya 'Beban listrik nasional (nat_demand)'. Kolom lain seperti suhu juga bisa diramal.")
+                tcol = st.selectbox("Kolom tanggal & jam", cols, index=cols.index(t_guess))
+                ycol = st.selectbox("Kolom yang ingin diramal", cols, index=cols.index(y_guess),
+                                    help="Biasanya nat_demand (beban listrik nasional). Arti setiap kolom ada di Kamus variabel.")
             mlabel = st.selectbox("Model", list(CHRONOS), index=2)
             h = int(st.number_input("Berapa langkah ke depan?", 1, 168, 24, help="Paling tepat sampai 64 langkah"))
             ctx_len = st.select_slider("Berapa banyak data lampau dipakai?", [168, 336, 512, 1024, 2048], value=2048)
@@ -982,8 +982,8 @@ with tabs["🚀 Ramalan Langsung"]:
         if R is None:
             with st.container(border=True):
                 head("Belum ada ramalan", "Pilih data lalu klik 'Ramalkan sekarang'. Contoh isi file yang bisa diunggah:")
-                st.dataframe(pd.DataFrame({"datetime (tanggal & jam)": ["2020-06-26 01:00", "2020-06-26 02:00", "…"],
-                                           "nat_demand (beban listrik nasional, MWh)": [1012.5, 978.1, None]}), hide_index=True)
+                st.dataframe(pd.DataFrame({"datetime": ["2020-06-26 01:00", "2020-06-26 02:00", "…"],
+                                           "nat_demand": [1012.5, 978.1, None]}), hide_index=True)
                 st.caption("Nama kolom boleh berbeda — Anda bisa memilih kolomnya di panel pengaturan.")
             with st.expander("📖 Kamus variabel data contoh", expanded=False):
                 st.dataframe(kamus_df(), hide_index=True)
@@ -1017,7 +1017,7 @@ with tabs["🚀 Ramalan Langsung"]:
                 fig.add_trace(go.Scatter(x=R["fidx"], y=R["med"], name="Ramalan", mode="lines+markers", marker=dict(size=5),
                                          line=dict(color=BLUE, width=3), hovertemplate="%{y:,.1f}"))
                 fig.add_vline(x=R["s"].index[-1], line=dict(color=MUTED, dash="dash"))
-                show(style(fig, 420).update_yaxes(title=COL_DESC.get(R["ycol"], (str(R["ycol"]),))[0][:40]), "live")
+                show(style(fig, 420).update_yaxes(title=str(R["ycol"])), "live")
                 out = pd.DataFrame({"waktu": R["fidx"], "ramalan": R["med"], "batas_bawah": R["lo"], "batas_atas": R["hi"]})
                 if R["actual"] is not None:
                     out["kenyataan"] = R["actual"].values
