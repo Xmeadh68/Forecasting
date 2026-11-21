@@ -1,0 +1,39 @@
+fitur,kelompok,nilai
+lag_168,Riwayat beban (lag),70.27344105677535
+lag_336,Riwayat beban (lag),31.351598455809732
+lag_24,Riwayat beban (lag),23.75438571051759
+y_at_origin,Riwayat beban (lag),22.17384785627886
+dow,Kalender (jam/hari/musim),17.071010176249725
+lag_168_ratio,Riwayat beban (lag),13.088694415110185
+Holiday_ID,Libur & sekolah,11.190248465636198
+T2M_toc,Suhu,9.049174070055775
+hour,Kalender (jam/hari/musim),6.736395168327841
+lag_72,Riwayat beban (lag),6.0499524024177544
+roll168_mean,Riwayat beban (lag),5.066612225249697
+T2M_mean,Suhu,4.851382531195875
+horizon,Kalender (jam/hari/musim),3.6456165378006737
+TQL_toc,Presipitasi,3.5553144595830006
+doy_cos,Kalender (jam/hari/musim),3.553062751462632
+weekend,Kalender (jam/hari/musim),3.38931584600942
+roll24_mean,Riwayat beban (lag),3.272642087159233
+lag_48,Riwayat beban (lag),2.4366346631680185
+mean24_origin,Riwayat beban (lag),2.3765786328265537
+QV2M_toc,Kelembapan,2.247262793515046
+T2M_mean_24h,Suhu,1.6839748207479674
+roll24_max,Riwayat beban (lag),1.6248860365402609
+roll24_std,Riwayat beban (lag),1.504280448878231
+W2M_toc,Angin,1.2636001717496312
+holiday,Libur & sekolah,1.1757343404469272
+doy_sin,Kalender (jam/hari/musim),1.1486712729703306
+T2M_dav,Suhu,1.1270455453722297
+TQL_san,Presipitasi,0.9970779313166249
+QV2M_san,Kelembapan,0.876719206316632
+T2M_san,Suhu,0.8290308426150574
+QV2M_mean,Kelembapan,0.7985429206838203
+school,Libur & sekolah,0.79169855326799
+QV2M_dav,Kelembapan,0.7424632843941161
+W2M_dav,Angin,0.6716552531851794
+W2M_san,Angin,0.6628282687474404
+TQL_dav,Presipitasi,0.5632320718831306
+month,Kalender (jam/hari/musim),0.5251782499450484
+covid,Rezim COVID-19,0.0

@@ -1,0 +1,49 @@
+{
+  "best": "Hybrid Chronos-2 + LSTM",
+  "imp_model": "LightGBM",
+  "imp_method": "mean |SHAP| (MWh)",
+  "horizon": 24,
+  "test_days": 400,
+  "val_days": 200,
+  "split": [
+    {
+      "bagian": "Train",
+      "mulai": "2015-01-03 01:00:00",
+      "selesai": "2018-11-05 00:00:00",
+      "hari": 1402,
+      "jam": 33648,
+      "persen": 70.0
+    },
+    {
+      "bagian": "Validasi",
+      "mulai": "2018-11-05 01:00:00",
+      "selesai": "2019-05-24 00:00:00",
+      "hari": 200,
+      "jam": 4800,
+      "persen": 10.0
+    },
+    {
+      "bagian": "Test",
+      "mulai": "2019-05-24 01:00:00",
+      "selesai": "2020-06-27 00:00:00",
+      "hari": 400,
+      "jam": 9600,
+      "persen": 20.0
+    }
+  ],
+  "covid_start": "2020-03-15",
+  "tl_context": 2048,
+  "suspect": [
+    "TimesFM 2.5 (zero-shot)"
+  ],
+  "hybrid_base": "Chronos-2 + kovariat",
+  "last_ts": "2020-06-27 00:00:00",
+  "data_start": "2015-01-03 01:00:00",
+  "n_obs": 48048,
+  "ensemble_members": [
+    "Hybrid Chronos-2 + LSTM",
+    "Hybrid Chronos-2 + LightGBM",
+    "Chronos-2 + kovariat"
+  ],
+  "generated": "2026-11-21 08:19"
+}
