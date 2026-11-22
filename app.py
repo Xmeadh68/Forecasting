@@ -386,12 +386,14 @@ if SC.empty:
     st.stop()
 SCI = SC.set_index("Model")
 
-# ---------- ramalan besok untuk model terpilih + interval dari galat 90 hari terakhir ----------
+# ---------- prakiraan 24 jam ke depan untuk model terpilih + interval dari galat 90 hari terakhir ----------
 g90 = TEST[(TEST.model == sel_model) & (TEST.origin >= TEST.origin.max() - pd.Timedelta(days=89))]
 qq = g90.groupby("horizon").galat.quantile([0.1, 0.9]).unstack()
 FUT = PRED[(PRED.split == "future") & (PRED.model == sel_model)].sort_values("datetime").reset_index(drop=True)
 FUT["lo"], FUT["hi"] = FUT.prediksi.values + qq[0.1].values, FUT.prediksi.values + qq[0.9].values
 pk = FUT.loc[FUT.prediksi.idxmax()]
+F_DAY = FUT.datetime.iloc[0]
+F_LABEL = f"{HARI[F_DAY.dayofweek]}, {tgl(F_DAY)}"          # hari yang diramal, mis. Sabtu, 27 Jun 2020
 daily_peaks = y_all.loc[LAST - pd.Timedelta(days=90):].resample("D").max()
 pct = (daily_peaks < pk.prediksi).mean() * 100
 status = ("Tinggi", "hi", "b-hi") if pct >= 90 else (("Sedang", "md", "b-md") if pct >= 50 else ("Normal", "ok", "b-ok"))
@@ -407,8 +409,8 @@ if ms is not None:
               f"RMSE {fmt(ms.RMSE, 1)} MWh · R² {fmt(ms.R2, 3)}"),
              ("📈", "Lebih tepat dari cara sederhana", f"{fmt(better, 0)}%" if better == better else "–",
               "dibanding menyalin beban minggu lalu"),
-             ("🔝", "Puncak beban besok", f"{fmt(pk.prediksi, 0)} MWh", f"sekitar pukul {pk.datetime:%H:%M}"),
-             ("🚦", "Status beban besok", status[0], f"lebih tinggi dari {pct:.0f}% hari dalam 3 bulan terakhir", status[1])])
+             ("🔝", "Perkiraan beban puncak", f"{fmt(pk.prediksi, 0)} MWh", f"{F_LABEL}, sekitar pukul {pk.datetime:%H:%M}"),
+             ("🚦", "Kategori beban puncak", status[0], f"lebih tinggi dari {pct:.0f}% puncak harian 3 bulan terakhir", status[1])])
 
 # =============================================================================
 # TABS
@@ -574,182 +576,8 @@ with tabs["🏠 Ringkasan"]:
     if SUSPECT:
         bl.append(f"⚠️ <b>{', '.join(short(x) for x in SUSPECT)}</b> hasilnya terlalu sempurna, diduga sudah pernah "
                   f"\"melihat\" data ini saat dilatih oleh pembuatnya. Tetap ditampilkan, tetapi tidak dijadikan model terbaik.")
-    step(1, "Ramalan besok", "Informasi paling penting: berapa kebutuhan listrik 24 jam ke depan dan kapan puncaknya")
-    # ---------- ramalan besok + jam kritis ----------
-    c1, c2 = st.columns([2.35, 1])
-    with c1:
-        with card(560):
-            head("⚡ Ramalan kebutuhan listrik 24 jam ke depan",
-                 f"{short(sel_model)} · area biru muda = rentang kemungkinan (80% yakin nilai sebenarnya ada di sini)")
-            hist = y_all.loc[LAST - pd.Timedelta(hours=71):LAST]
-            lastweek = y_all.reindex(FUT.datetime - pd.Timedelta(days=7)).values
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=FUT.datetime, y=FUT.hi, line=dict(width=0), showlegend=False, hoverinfo="skip"))
-            fig.add_trace(go.Scatter(x=FUT.datetime, y=FUT.lo, fill="tonexty", fillcolor="rgba(63,138,224,0.16)",
-                                     line=dict(width=0), name="Rentang kemungkinan", hoverinfo="skip"))
-            fig.add_trace(go.Scatter(x=hist.index, y=hist.values, name="Kenyataan 3 hari terakhir",
-                                     line=dict(color="#8a97ab", width=2), hovertemplate="%{y:,.0f} MWh"))
-            fig.add_trace(go.Scatter(x=FUT.datetime, y=lastweek, name="Minggu lalu (jam yang sama)",
-                                     line=dict(color="#93c5fd", width=1.6, dash="dot"), hovertemplate="%{y:,.0f} MWh"))
-            fig.add_trace(go.Scatter(x=FUT.datetime, y=FUT.prediksi, name="Ramalan", mode="lines+markers",
-                                     marker=dict(size=6, color=BLUE), line=dict(color=BLUE, width=3), hovertemplate="%{y:,.0f} MWh"))
-            fig.add_vline(x=LAST, line=dict(color=MUTED, dash="dash"))
-            fig.add_annotation(x=pk.datetime, y=pk.prediksi, text=f"Puncak {fmt(pk.prediksi, 0)} MWh", showarrow=True,
-                               arrowhead=2, ay=-36, font=dict(color=INK, size=11.5), bgcolor="#fff", bordercolor=BLUE)
-            show(style(fig, 360).update_yaxes(title="MWh"), "fut")
-            dlw = (FUT.prediksi.sum() / np.nansum(lastweek) - 1) * 100
-            insight(f"Besok kebutuhan listrik diperkirakan paling tinggi sekitar <b>pukul {pk.datetime:%H:%M}</b> "
-                    f"({fmt(pk.prediksi, 0)} MWh). Total kebutuhan sehari <b>{'lebih tinggi' if dlw > 0 else 'lebih rendah'} "
-                    f"{fmt(abs(dlw), 1)}%</b> dibanding hari yang sama minggu lalu.")
-    with c2:
-        with card(560):
-            head("⏰ Jam-jam penting besok", "Bekal untuk mengatur pembangkit")
-            ramp = np.diff(np.r_[y_all.loc[LAST], FUT.prediksi.values])
-            ri = int(np.argmax(ramp))
-            lo_i = FUT.prediksi.idxmin()
-            rows = [("🔝 Beban tertinggi", f"{fmt(pk.prediksi, 0)} MWh<small>pukul {pk.datetime:%H:%M}</small>"),
-                    ("🔻 Beban terendah", f"{fmt(FUT.loc[lo_i, 'prediksi'], 0)} MWh<small>pukul {FUT.loc[lo_i, 'datetime']:%H:%M}</small>"),
-                    ("🚀 Kenaikan paling cepat", f"+{fmt(ramp[ri], 0)} MW/jam<small>menjelang pukul {FUT.datetime.iloc[ri]:%H:%M}</small>"),
-                    ("🔋 Total energi sehari", f"{fmt(FUT.prediksi.sum() / 1000, 2)} GWh<small>rata-rata {fmt(FUT.prediksi.mean(), 0)} MWh/jam</small>"),
-                    ("⚖️ Kerataan beban", f"{fmt(FUT.prediksi.mean() / pk.prediksi * 100, 0)}%<small>makin tinggi makin merata</small>"),
-                    ("🚦 Status", f'<span class="badge {status[2]}">{status[0]}</span>')]
-            st.markdown("".join(f'<div class="crit"><span class="l">{a}</span><span class="v">{b}</span></div>' for a, b in rows),
-                        unsafe_allow_html=True)
-            out = FUT[["datetime", "prediksi", "lo", "hi"]].rename(columns={"datetime": "waktu", "prediksi": "ramalan_MWh",
-                                                                             "lo": "batas_bawah", "hi": "batas_atas"})
-            st.download_button("⬇️ Unduh ramalan 24 jam", out.round(1).to_csv(index=False).encode(), "ramalan_24jam.csv",
-                               "text/csv")
-            insight(f"Siapkan tambahan pasokan sebelum pukul <b>{FUT.datetime.iloc[ri]:%H:%M}</b>, saat beban naik paling cepat.")
-
-    hs1, hs2 = st.columns([4, 1])
-    with hs1:
-        step(2, "Seberapa tepat ramalannya?", "Perbandingan model pada periode yang dinilai — dari yang paling tepat")
-    with hs2:
-        st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
-        show_sum = st.toggle("Tampilkan kesimpulan", value=True, help="Tampilkan / sembunyikan kotak kesimpulan di sebelah kanan")
-    cols2 = st.columns([1.1, 1.1, 1]) if show_sum else st.columns(2)
-    with cols2[0]:
-        with card(600):
-            head("🏆 Model paling tepat", "Rata-rata meleset (%) · makin pendek makin bagus")
-            T = SC.head(8).iloc[::-1]
-            fig = go.Figure(go.Bar(x=T.MAPE, y=[short(n) + (" ⚠️" if n in SUSPECT else "") for n in T.Model], orientation="h",
-                                   marker=dict(color=[fam_color(n) for n in T.Model], line=dict(color="#fff", width=1),
-                                               pattern=dict(shape=["/" if n in SUSPECT else "" for n in T.Model])),
-                                   text=[f"{v:.2f}%" for v in T.MAPE], textposition="outside", cliponaxis=False,
-                                   textfont=dict(color=INK2, size=11), customdata=[FAM_ID.get(k, k) for k in T.Keluarga],
-                                   hovertemplate="<b>%{y}</b><br>%{customdata}<br>meleset %{x:.2f}%<extra></extra>"))
-            fig.update_layout(margin=dict(l=10, r=62, t=8, b=30))
-            fig.update_xaxes(range=[0, float(T.MAPE.max()) * 1.22])
-            show(style(fig, 320, legend=False, unified=False), "rank")
-            st.markdown(legend_html([(FAM_ID[k], c) for k, c in FAM.items() if k in set(T.Keluarga)]), unsafe_allow_html=True)
-            r0 = SC[~SC.Model.isin(SUSPECT)].iloc[0]
-            if r0.Model == BEST:
-                insight(f"<b>{short(r0.Model)}</b> — model terbaik — juga paling tepat pada periode ini: rata-rata meleset "
-                        f"<b>{fmt(r0.MAPE, 2)}%</b> (±{fmt(r0.MAE, 0)} MWh per jam).")
-            else:
-                insight(f"Pada periode ini <b>{short(r0.Model)}</b> paling tepat ({fmt(r0.MAPE, 2)}%). Model terbaik resmi tetap "
-                        f"<b>{short(BEST)}</b> ({fmt(SCI.MAPE.get(BEST, np.nan), 2)}%) karena dipilih dari data validasi, "
-                        f"bukan dari data uji — selisihnya kecil.")
-    with cols2[1]:
-        with card(600):
-            head("🦠 Saat normal vs masa COVID-19", "Rata-rata meleset (%) · 6 model teratas")
-            lbn = LB.dropna(subset=["MAPE_NORMAL", "MAPE_COVID"]) if "MAPE_COVID" in LB else pd.DataFrame()
-            if len(lbn):
-                T = lbn[~lbn.Model.isin(SUSPECT)].sort_values("VAL_MAE").head(6).iloc[::-1]
-                fig = go.Figure([go.Bar(name="Kondisi normal", y=[short(n) for n in T.Model], x=T.MAPE_NORMAL, orientation="h",
-                                        marker_color=BLUE, hovertemplate="%{x:.2f}%"),
-                                 go.Bar(name="Masa COVID-19", y=[short(n) for n in T.Model], x=T.MAPE_COVID, orientation="h",
-                                        marker_color=TEAL, hovertemplate="%{x:.2f}%")])
-                fig.update_layout(barmode="group", bargap=0.28, bargroupgap=0.06, margin=dict(l=10, r=14, t=40, b=30))
-                show(style(fig, 360, unified=False).update_xaxes(title="meleset (%)"), "regime")
-                rob = T.assign(d=T.MAPE_COVID - T.MAPE_NORMAL).sort_values("d").iloc[0]
-                worst = T.assign(d=T.MAPE_COVID - T.MAPE_NORMAL).sort_values("d").iloc[-1]
-                insight(f"Saat COVID-19 pola pemakaian listrik berubah drastis. <b>{short(rob.Model)}</b> paling stabil, "
-                        f"sedangkan <b>{short(worst.Model)}</b> paling terganggu (meleset naik {fmt(worst.d, 1)} poin).")
-    if show_sum:
-        with cols2[2]:
-            with card(600):
-                head("📌 Kesimpulan", "Inti dari perbandingan model")
-                st.markdown('<div class="sum" style="box-shadow:none;border:0;padding:2px 2px;margin:0"><ul>'
-                            + "".join(f"<li>{x}</li>" for x in bl) + "</ul></div>", unsafe_allow_html=True)
-
-    c1_, c2_, c3_ = theme
-    st.markdown(f"""
-<div style="background:linear-gradient(120deg,{c1_} 0%,{c2_} 100%);border-radius:16px;padding:14px 20px;margin:22px 0 12px;
-color:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 6px 18px rgba(11,60,117,.18)">
-<div style="display:flex;gap:14px;align-items:center"><div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.22);
-display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px">3</div><div>
-<div style="font-size:12px;letter-spacing:.8px;text-transform:uppercase;opacity:.85;font-weight:700">Temuan periode yang dinilai</div>
-<div style="font-size:20px;font-weight:800;margin-top:1px">{judul}</div>
-<div style="font-size:13px;opacity:.9;margin-top:1px">{sub}</div></div></div>
-<div style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);border-radius:999px;padding:5px 14px;font-size:12.5px">
-{len(tiles)} temuan otomatis · ubah lewat “Periode yang dinilai”</div></div>""", unsafe_allow_html=True)
-
-    cA, cB = st.columns([1.2, 1])
-    with cA:
-        with card(440):
-            nrow = (len(tiles) + 1) // 2
-            html = "".join(
-                f'<div style="background:#fff;border:1px solid #e3ebf6;border-radius:14px;padding:11px 13px;display:flex;gap:11px;'
-                f'align-items:flex-start;overflow:hidden">'
-                f'<div style="width:40px;height:40px;border-radius:12px;background:{c3_};display:flex;align-items:center;'
-                f'justify-content:center;font-size:20px;flex:none">{ic}</div><div style="min-width:0">'
-                f'<div style="font-size:{18.5 if len(big) <= 14 else 15}px;font-weight:800;color:{INK};line-height:1.2">{big}</div>'
-                f'<div style="font-size:12.6px;font-weight:700;color:{c1_};margin-top:3px;line-height:1.3">{lab}</div>'
-                f'<div style="font-size:11.8px;color:{MUTED};margin-top:2px;line-height:1.38">{desc}</div></div></div>'
-                for ic, big, lab, desc in tiles)
-            st.markdown(f'<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat({nrow},1fr);'
-                        f'gap:10px;height:400px">{html}</div>', unsafe_allow_html=True)
-    with cB:
-        with card(440):
-            head(chart_t, chart_s)
-            show(style(figp, 355, legend=not is_bar, unified=not is_bar), "periode")
-
-    step(4, "Apa yang memengaruhi beban listrik?", "Kelompok variabel dan variabel luar yang paling menentukan ramalan")
-    v1, v2 = st.columns(2)
-    with v1:
-        with card(520):
-            head("🧩 Apa yang menentukan ramalan?", "Porsi pengaruh tiap kelompok variabel")
-            if B["grp"] is not None:
-                g = B["grp"].sort_values("kontribusi_pct", ascending=False).reset_index(drop=True)
-                labels = [nice_group(k) for k in g.kelompok]
-                cols = [RAMP[min(i, len(RAMP) - 1)] for i in range(len(g))]
-                txt = [f"{v:.0f}%" if v >= 5 else "" for v in g.kontribusi_pct]
-                fig = go.Figure(go.Pie(labels=labels, values=g.kontribusi_pct, hole=0.62, sort=False, direction="clockwise",
-                                       marker=dict(colors=cols, line=dict(color="#fff", width=2)), text=txt,
-                                       textinfo="text", textposition="inside", insidetextorientation="horizontal",
-                                       textfont=dict(color="#fff", size=12),
-                                       hovertemplate="%{label}<br>%{value:.1f}%<extra></extra>", domain=dict(x=[0.1, 0.9], y=[0, 1])))
-                fig.update_layout(annotations=[dict(text=f"<b>{g.kontribusi_pct.iloc[0]:.0f}%</b><br><span style='font-size:11px'>"
-                                                         f"variabel utama</span>", x=0.5, y=0.5, showarrow=False,
-                                                    font=dict(size=20, color=INK))])
-                show(style(fig, 270, legend=False, unified=False).update_layout(margin=dict(l=0, r=0, t=6, b=6)), "donut")
-                st.markdown(legend_html(list(zip([f"{l} ({v:.1f}%)" for l, v in zip(labels, g.kontribusi_pct)], cols))[:6]),
-                            unsafe_allow_html=True)
-                gx = g[g.kelompok.isin(["Suhu", "Kelembapan", "Presipitasi", "Angin", "Libur & sekolah"])]
-                insight(f"Ramalan paling banyak ditentukan oleh <b>{nice_group(g.kelompok.iloc[0]).lower()}</b> "
-                        f"({g.kontribusi_pct.iloc[0]:.0f}%). Dari variabel luar, yang paling berpengaruh adalah "
-                        f"<b>{nice_group(gx.kelompok.iloc[0]).lower() if len(gx) else '-'}</b>.")
-    with v2:
-        with card(520):
-            head("🌦️ Variabel luar paling berpengaruh", "Selain pola beban sebelumnya · makin panjang makin berpengaruh")
-            if B["feat"] is not None:
-                FX = B["feat"][~B["feat"].kelompok.isin(["Riwayat beban (lag)"])].sort_values("nilai", ascending=False).head(8)
-                FX = FX.iloc[::-1]
-                fig = go.Figure(go.Bar(x=FX.nilai, y=[nice_feat(f) for f in FX.fitur], orientation="h",
-                                       marker=dict(color=FX.nilai, colorscale=SEQ[1:], line=dict(color="#fff", width=1)),
-                                       customdata=[nice_group(k) for k in FX.kelompok],
-                                       hovertemplate="<b>%{y}</b><br>%{customdata}<extra></extra>"))
-                fig.update_layout(margin=dict(l=10, r=16, t=8, b=20))
-                fig.update_xaxes(showticklabels=False)
-                show(style(fig, 340, legend=False, unified=False), "extvar")
-                top_ = FX.iloc[::-1]
-                insight(f"Variabel luar terpenting: <b>{nice_feat(top_.fitur.iloc[0])}</b>, lalu "
-                        f"<b>{nice_feat(top_.fitur.iloc[1]) if len(top_) > 1 else '-'}</b>. Rincian lengkap ada di tab "
-                        f"<b>🔍 Variabel yang Berpengaruh</b>.")
-
     # ---------- eksplorasi data (yang penting) ----------
-    step(5, "Mengenal pola beban listrik", "Pola historis 2015–2020 yang menjadi dasar ramalan")
+    step(1, "Mengenal pola beban listrik", "Latar belakang: pola historis 2015–2020 yang menjadi dasar ramalan")
     with st.container(border=True):
         head("📈 Perjalanan beban listrik dari tahun ke tahun",
              "Garis tipis = rata-rata harian · garis tebal = rata-rata 30 hari · area teal = masa COVID-19")
@@ -802,6 +630,183 @@ display:flex;align-items:center;justify-content:center;font-weight:800;font-size
                 dd = (1 - prof["Hari libur"].mean() / prof["Hari kerja"].mean()) * 100
                 insight(f"Di hari libur, pemakaian listrik rata-rata <b>{fmt(dd, 0)}% lebih rendah</b> dari hari kerja. "
                         f"Puncak hari kerja terjadi sekitar <b>pukul {int(prof['Hari kerja'].idxmax()):02d}:00</b>.")
+
+    step(2, "Prakiraan beban listrik 24 jam ke depan",
+         f"{F_LABEL} — berapa kebutuhan listrik nasional, kapan mencapai puncak, dan seberapa yakin ramalannya")
+    # ---------- prakiraan 24 jam ke depan + jam kritis ----------
+    c1, c2 = st.columns([2.35, 1])
+    with c1:
+        with card(560):
+            head("⚡ Kurva beban per jam: ramalan dan 3 hari sebelumnya",
+                 f"{short(sel_model)} · area biru muda = rentang kemungkinan (80% yakin nilai sebenarnya ada di sini)")
+            hist = y_all.loc[LAST - pd.Timedelta(hours=71):LAST]
+            lastweek = y_all.reindex(FUT.datetime - pd.Timedelta(days=7)).values
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=FUT.datetime, y=FUT.hi, line=dict(width=0), showlegend=False, hoverinfo="skip"))
+            fig.add_trace(go.Scatter(x=FUT.datetime, y=FUT.lo, fill="tonexty", fillcolor="rgba(63,138,224,0.16)",
+                                     line=dict(width=0), name="Rentang kemungkinan", hoverinfo="skip"))
+            fig.add_trace(go.Scatter(x=hist.index, y=hist.values, name="Kenyataan 3 hari terakhir",
+                                     line=dict(color="#8a97ab", width=2), hovertemplate="%{y:,.0f} MWh"))
+            fig.add_trace(go.Scatter(x=FUT.datetime, y=lastweek, name="Minggu lalu (jam yang sama)",
+                                     line=dict(color="#93c5fd", width=1.6, dash="dot"), hovertemplate="%{y:,.0f} MWh"))
+            fig.add_trace(go.Scatter(x=FUT.datetime, y=FUT.prediksi, name="Ramalan", mode="lines+markers",
+                                     marker=dict(size=6, color=BLUE), line=dict(color=BLUE, width=3), hovertemplate="%{y:,.0f} MWh"))
+            fig.add_vline(x=LAST, line=dict(color=MUTED, dash="dash"))
+            fig.add_annotation(x=pk.datetime, y=pk.prediksi, text=f"Puncak {fmt(pk.prediksi, 0)} MWh", showarrow=True,
+                               arrowhead=2, ay=-36, font=dict(color=INK, size=11.5), bgcolor="#fff", bordercolor=BLUE)
+            show(style(fig, 360).update_yaxes(title="MWh"), "fut")
+            dlw = (FUT.prediksi.sum() / np.nansum(lastweek) - 1) * 100
+            insight(f"Pada <b>{F_LABEL}</b>, kebutuhan listrik nasional diperkirakan mencapai puncak sekitar "
+                    f"<b>pukul {pk.datetime:%H:%M}</b> sebesar <b>{fmt(pk.prediksi, 0)} MWh</b>. Total kebutuhan sehari "
+                    f"<b>{'lebih tinggi' if dlw > 0 else 'lebih rendah'} {fmt(abs(dlw), 1)}%</b> dibanding hari "
+                    f"{HARI[F_DAY.dayofweek]} pekan sebelumnya.")
+    with c2:
+        with card(560):
+            head("⏰ Momen penting dalam 24 jam ke depan", "Panduan menyiapkan pembangkit")
+            ramp = np.diff(np.r_[y_all.loc[LAST], FUT.prediksi.values])
+            ri = int(np.argmax(ramp))
+            lo_i = FUT.prediksi.idxmin()
+            rows = [("🔝 Beban tertinggi", f"{fmt(pk.prediksi, 0)} MWh<small>pukul {pk.datetime:%H:%M}</small>"),
+                    ("🔻 Beban terendah", f"{fmt(FUT.loc[lo_i, 'prediksi'], 0)} MWh<small>pukul {FUT.loc[lo_i, 'datetime']:%H:%M}</small>"),
+                    ("🚀 Kenaikan paling cepat", f"+{fmt(ramp[ri], 0)} MW/jam<small>menjelang pukul {FUT.datetime.iloc[ri]:%H:%M}</small>"),
+                    ("🔋 Total energi sehari", f"{fmt(FUT.prediksi.sum() / 1000, 2)} GWh<small>rata-rata {fmt(FUT.prediksi.mean(), 0)} MWh/jam</small>"),
+                    ("⚖️ Kerataan beban", f"{fmt(FUT.prediksi.mean() / pk.prediksi * 100, 0)}%<small>makin tinggi makin merata</small>"),
+                    ("🚦 Status", f'<span class="badge {status[2]}">{status[0]}</span>')]
+            st.markdown("".join(f'<div class="crit"><span class="l">{a}</span><span class="v">{b}</span></div>' for a, b in rows),
+                        unsafe_allow_html=True)
+            out = FUT[["datetime", "prediksi", "lo", "hi"]].rename(columns={"datetime": "waktu", "prediksi": "ramalan_MWh",
+                                                                             "lo": "batas_bawah", "hi": "batas_atas"})
+            st.download_button("⬇️ Unduh ramalan 24 jam", out.round(1).to_csv(index=False).encode(), "ramalan_24jam.csv",
+                               "text/csv")
+            insight(f"Tambahan pasokan perlu siap sebelum <b>pukul {FUT.datetime.iloc[ri]:%H:%M}</b>, saat beban naik paling "
+                    f"cepat (+{fmt(ramp[ri], 0)} MW dalam satu jam).")
+
+    hs1, hs2 = st.columns([4, 1])
+    with hs1:
+        step(3, "Seberapa tepat ramalannya?", "Perbandingan model pada periode yang dinilai — dari yang paling tepat")
+    with hs2:
+        st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+        show_sum = st.toggle("Tampilkan kesimpulan", value=True, help="Tampilkan / sembunyikan kotak kesimpulan di sebelah kanan")
+    cols2 = st.columns([1.1, 1.1, 1]) if show_sum else st.columns(2)
+    with cols2[0]:
+        with card(600):
+            head("🏆 Model paling tepat", "Rata-rata meleset (%) · makin pendek makin bagus")
+            T = SC.head(8).iloc[::-1]
+            fig = go.Figure(go.Bar(x=T.MAPE, y=[short(n) + (" ⚠️" if n in SUSPECT else "") for n in T.Model], orientation="h",
+                                   marker=dict(color=[fam_color(n) for n in T.Model], line=dict(color="#fff", width=1),
+                                               pattern=dict(shape=["/" if n in SUSPECT else "" for n in T.Model])),
+                                   text=[f"{v:.2f}%" for v in T.MAPE], textposition="outside", cliponaxis=False,
+                                   textfont=dict(color=INK2, size=11), customdata=[FAM_ID.get(k, k) for k in T.Keluarga],
+                                   hovertemplate="<b>%{y}</b><br>%{customdata}<br>meleset %{x:.2f}%<extra></extra>"))
+            fig.update_layout(margin=dict(l=10, r=62, t=8, b=30))
+            fig.update_xaxes(range=[0, float(T.MAPE.max()) * 1.22])
+            show(style(fig, 320, legend=False, unified=False), "rank")
+            st.markdown(legend_html([(FAM_ID[k], c) for k, c in FAM.items() if k in set(T.Keluarga)]), unsafe_allow_html=True)
+            r0 = SC[~SC.Model.isin(SUSPECT)].iloc[0]
+            if r0.Model == BEST:
+                insight(f"<b>{short(r0.Model)}</b> — model terbaik — juga paling tepat pada periode ini: rata-rata meleset "
+                        f"<b>{fmt(r0.MAPE, 2)}%</b> (±{fmt(r0.MAE, 0)} MWh per jam).")
+            else:
+                insight(f"Pada periode ini <b>{short(r0.Model)}</b> paling tepat ({fmt(r0.MAPE, 2)}%). Model terbaik resmi tetap "
+                        f"<b>{short(BEST)}</b> ({fmt(SCI.MAPE.get(BEST, np.nan), 2)}%) karena dipilih dari data validasi, "
+                        f"bukan dari data uji — selisihnya kecil.")
+    with cols2[1]:
+        with card(600):
+            head("🦠 Saat normal vs masa COVID-19", "Rata-rata meleset (%) · 6 model teratas")
+            lbn = LB.dropna(subset=["MAPE_NORMAL", "MAPE_COVID"]) if "MAPE_COVID" in LB else pd.DataFrame()
+            if len(lbn):
+                T = lbn[~lbn.Model.isin(SUSPECT)].sort_values("VAL_MAE").head(6).iloc[::-1]
+                fig = go.Figure([go.Bar(name="Kondisi normal", y=[short(n) for n in T.Model], x=T.MAPE_NORMAL, orientation="h",
+                                        marker_color=BLUE, hovertemplate="%{x:.2f}%"),
+                                 go.Bar(name="Masa COVID-19", y=[short(n) for n in T.Model], x=T.MAPE_COVID, orientation="h",
+                                        marker_color=TEAL, hovertemplate="%{x:.2f}%")])
+                fig.update_layout(barmode="group", bargap=0.28, bargroupgap=0.06, margin=dict(l=10, r=14, t=40, b=30))
+                show(style(fig, 360, unified=False).update_xaxes(title="meleset (%)"), "regime")
+                rob = T.assign(d=T.MAPE_COVID - T.MAPE_NORMAL).sort_values("d").iloc[0]
+                worst = T.assign(d=T.MAPE_COVID - T.MAPE_NORMAL).sort_values("d").iloc[-1]
+                insight(f"Saat COVID-19 pola pemakaian listrik berubah drastis. <b>{short(rob.Model)}</b> paling stabil, "
+                        f"sedangkan <b>{short(worst.Model)}</b> paling terganggu (meleset naik {fmt(worst.d, 1)} poin).")
+    if show_sum:
+        with cols2[2]:
+            with card(600):
+                head("📌 Kesimpulan", "Inti dari perbandingan model")
+                st.markdown('<div class="sum" style="box-shadow:none;border:0;padding:2px 2px;margin:0"><ul>'
+                            + "".join(f"<li>{x}</li>" for x in bl) + "</ul></div>", unsafe_allow_html=True)
+
+    step(4, "Apa yang memengaruhi beban listrik?", "Kelompok variabel dan variabel luar yang paling menentukan ramalan")
+    v1, v2 = st.columns(2)
+    with v1:
+        with card(520):
+            head("🧩 Apa yang menentukan ramalan?", "Porsi pengaruh tiap kelompok variabel")
+            if B["grp"] is not None:
+                g = B["grp"].sort_values("kontribusi_pct", ascending=False).reset_index(drop=True)
+                labels = [nice_group(k) for k in g.kelompok]
+                cols = [RAMP[min(i, len(RAMP) - 1)] for i in range(len(g))]
+                txt = [f"{v:.0f}%" if v >= 5 else "" for v in g.kontribusi_pct]
+                fig = go.Figure(go.Pie(labels=labels, values=g.kontribusi_pct, hole=0.62, sort=False, direction="clockwise",
+                                       marker=dict(colors=cols, line=dict(color="#fff", width=2)), text=txt,
+                                       textinfo="text", textposition="inside", insidetextorientation="horizontal",
+                                       textfont=dict(color="#fff", size=12),
+                                       hovertemplate="%{label}<br>%{value:.1f}%<extra></extra>", domain=dict(x=[0.1, 0.9], y=[0, 1])))
+                fig.update_layout(annotations=[dict(text=f"<b>{g.kontribusi_pct.iloc[0]:.0f}%</b><br><span style='font-size:11px'>"
+                                                         f"variabel utama</span>", x=0.5, y=0.5, showarrow=False,
+                                                    font=dict(size=20, color=INK))])
+                show(style(fig, 270, legend=False, unified=False).update_layout(margin=dict(l=0, r=0, t=6, b=6)), "donut")
+                st.markdown(legend_html(list(zip([f"{l} ({v:.1f}%)" for l, v in zip(labels, g.kontribusi_pct)], cols))[:6]),
+                            unsafe_allow_html=True)
+                gx = g[g.kelompok.isin(["Suhu", "Kelembapan", "Presipitasi", "Angin", "Libur & sekolah"])]
+                insight(f"Ramalan paling banyak ditentukan oleh <b>{nice_group(g.kelompok.iloc[0]).lower()}</b> "
+                        f"({g.kontribusi_pct.iloc[0]:.0f}%). Dari variabel luar, yang paling berpengaruh adalah "
+                        f"<b>{nice_group(gx.kelompok.iloc[0]).lower() if len(gx) else '-'}</b>.")
+    with v2:
+        with card(520):
+            head("🌦️ Variabel luar paling berpengaruh", "Selain pola beban sebelumnya · makin panjang makin berpengaruh")
+            if B["feat"] is not None:
+                FX = B["feat"][~B["feat"].kelompok.isin(["Riwayat beban (lag)"])].sort_values("nilai", ascending=False).head(8)
+                FX = FX.iloc[::-1]
+                fig = go.Figure(go.Bar(x=FX.nilai, y=[nice_feat(f) for f in FX.fitur], orientation="h",
+                                       marker=dict(color=FX.nilai, colorscale=SEQ[1:], line=dict(color="#fff", width=1)),
+                                       customdata=[nice_group(k) for k in FX.kelompok],
+                                       hovertemplate="<b>%{y}</b><br>%{customdata}<extra></extra>"))
+                fig.update_layout(margin=dict(l=10, r=16, t=8, b=20))
+                fig.update_xaxes(showticklabels=False)
+                show(style(fig, 340, legend=False, unified=False), "extvar")
+                top_ = FX.iloc[::-1]
+                insight(f"Variabel luar terpenting: <b>{nice_feat(top_.fitur.iloc[0])}</b>, lalu "
+                        f"<b>{nice_feat(top_.fitur.iloc[1]) if len(top_) > 1 else '-'}</b>. Rincian lengkap ada di tab "
+                        f"<b>🔍 Variabel yang Berpengaruh</b>.")
+
+    c1_, c2_, c3_ = theme
+    st.markdown(f"""
+<div style="background:linear-gradient(120deg,{c1_} 0%,{c2_} 100%);border-radius:16px;padding:14px 20px;margin:22px 0 12px;
+color:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 6px 18px rgba(11,60,117,.18)">
+<div style="display:flex;gap:14px;align-items:center"><div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.22);
+display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px">5</div><div>
+<div style="font-size:12px;letter-spacing:.8px;text-transform:uppercase;opacity:.85;font-weight:700">Temuan periode yang dinilai</div>
+<div style="font-size:20px;font-weight:800;margin-top:1px">{judul}</div>
+<div style="font-size:13px;opacity:.9;margin-top:1px">{sub}</div></div></div>
+<div style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);border-radius:999px;padding:5px 14px;font-size:12.5px">
+{len(tiles)} temuan otomatis · ubah lewat “Periode yang dinilai”</div></div>""", unsafe_allow_html=True)
+
+    cA, cB = st.columns([1.2, 1])
+    with cA:
+        with card(440):
+            nrow = (len(tiles) + 1) // 2
+            html = "".join(
+                f'<div style="background:#fff;border:1px solid #e3ebf6;border-radius:14px;padding:11px 13px;display:flex;gap:11px;'
+                f'align-items:flex-start;overflow:hidden">'
+                f'<div style="width:40px;height:40px;border-radius:12px;background:{c3_};display:flex;align-items:center;'
+                f'justify-content:center;font-size:20px;flex:none">{ic}</div><div style="min-width:0">'
+                f'<div style="font-size:{18.5 if len(big) <= 14 else 15}px;font-weight:800;color:{INK};line-height:1.2">{big}</div>'
+                f'<div style="font-size:12.6px;font-weight:700;color:{c1_};margin-top:3px;line-height:1.3">{lab}</div>'
+                f'<div style="font-size:11.8px;color:{MUTED};margin-top:2px;line-height:1.38">{desc}</div></div></div>'
+                for ic, big, lab, desc in tiles)
+            st.markdown(f'<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat({nrow},1fr);'
+                        f'gap:10px;height:400px">{html}</div>', unsafe_allow_html=True)
+    with cB:
+        with card(440):
+            head(chart_t, chart_s)
+            show(style(figp, 355, legend=not is_bar, unified=not is_bar), "periode")
 
 # =============================================================================
 # RAMALAN VS KENYATAAN
