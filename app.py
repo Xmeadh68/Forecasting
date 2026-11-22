@@ -404,6 +404,141 @@ tabs = dict(zip(tab_names, st.tabs(tab_names)))
 # RINGKASAN (termasuk eksplorasi data penting)
 # =============================================================================
 with tabs["🏠 Ringkasan"]:
+    # ---------- temuan khusus periode yang dinilai ----------
+    CS = pd.Timestamp(M.get("covid_start", "2020-03-15"))
+    T_START = pd.Timestamp(next((x["mulai"] for x in M.get("split", []) if x["bagian"] == "Test"), str(TEST.datetime.min())))
+    YR = pd.Timedelta(days=364)                                    # 52 minggu → hari dalam seminggu tetap sama
+
+    def prof24(a, b, weekend=None):
+        X = DATA.loc[a:b]
+        X = X[X.holiday == 0]
+        if weekend is not None:
+            X = X[(X.index.dayofweek >= 5) == weekend]
+        return X.groupby(X.index.hour).nat_demand.mean()
+
+    def wk_gap(a, b):
+        return (1 - prof24(a, b, True).mean() / prof24(a, b, False).mean()) * 100
+
+    Gm = TEST[TEST.model == sel_model]
+    m_norm = Gm[Gm.kondisi == "Normal"].ape.mean()
+    m_cov = Gm[Gm.kondisi == "COVID-19"].ape.mean()
+    ok = SC[~SC.Model.isin(SUSPECT)]
+    best_here = ok.iloc[0] if len(ok) else SC.iloc[0]
+    lbr = LB[~LB.Model.isin(SUSPECT) & (LB.Keluarga != "Baseline")].dropna(subset=["MAPE_NORMAL", "MAPE_COVID"]) \
+        if "MAPE_COVID" in LB else pd.DataFrame()
+    if len(lbr):
+        lbr = lbr.assign(naik=lbr.MAPE_COVID - lbr.MAPE_NORMAL)
+        rob, frag = lbr.sort_values("naik").iloc[0], lbr.sort_values("naik").iloc[-1]
+    temuan, figp = [], go.Figure()
+
+    if kondisi.startswith("Masa"):
+        judul = f"🦠 Temuan pada masa COVID-19 ({CS:%d %b} – {LAST:%d %b %Y})"
+        a19, b19 = CS - YR, LAST - YR
+        drop = (1 - y_all.loc[CS:LAST].mean() / y_all.loc[a19:b19].mean()) * 100
+        p19, p20 = prof24(a19, b19, False), prof24(CS, LAST, False)
+        g19, g20 = wk_gap(a19, b19), wk_gap(CS, LAST)
+        day19, day20 = p19.loc[9:17].mean(), p20.loc[9:17].mean()
+        ngt19, ngt20 = p19.loc[[0, 1, 2, 3, 4, 5]].mean(), p20.loc[[0, 1, 2, 3, 4, 5]].mean()
+        Gc = Gm[Gm.kondisi == "COVID-19"]
+        first = Gc[Gc.origin < CS + pd.Timedelta(days=14)].ape.mean()
+        rest = Gc[Gc.origin >= CS + pd.Timedelta(days=14)].ape.mean()
+        temuan += [f"Beban listrik rata-rata <b>turun {fmt(drop, 0)}%</b> dibanding periode yang sama tahun 2019.",
+                   f"Penurunan terbesar terjadi di <b>jam kerja (09–17)</b>: turun {fmt((1 - day20 / day19) * 100, 0)}%, "
+                   f"sedangkan malam hari (00–05) hanya turun {fmt((1 - ngt20 / ngt19) * 100, 0)}% — kantor, sekolah, dan "
+                   f"pusat belanja tutup, sementara rumah tangga tetap memakai listrik.",
+                   f"Beda hari kerja dan akhir pekan <b>menyempit</b>: dari {fmt(g19, 0)}% (2019) menjadi {fmt(g20, 0)}% — "
+                   f"saat pembatasan, setiap hari terasa seperti akhir pekan.",
+                   f"Model <b>{short(sel_model)}</b> meleset {fmt(first, 2)}% pada 2 minggu pertama lockdown, lalu "
+                   f"{'membaik' if rest < first else 'berubah'} menjadi {fmt(rest, 2)}% setelah pola baru terbaca."]
+        if len(lbr):
+            temuan.append(f"Paling tahan terhadap perubahan: <b>{short(rob.Model)}</b> (meleset {fmt(rob.MAPE_COVID, 2)}%). "
+                          f"Paling terganggu: <b>{short(frag.Model)}</b> (naik {fmt(frag.naik, 1)} poin) karena dilatih dengan "
+                          f"pola sebelum pandemi.")
+        for lab, p, c, d in [("Hari kerja 2019", p19, "#93c0f1", "dot"), ("Hari kerja masa COVID", p20, NAVY, None),
+                             ("Akhir pekan 2019", prof24(a19, b19, True), "#9fd6cf", "dot"),
+                             ("Akhir pekan masa COVID", prof24(CS, LAST, True), TEAL, None)]:
+            figp.add_trace(go.Scatter(x=p.index, y=p.values, name=lab, line=dict(color=c, width=2.6 if d is None else 2, dash=d),
+                                      hovertemplate="%{y:,.0f} MWh"))
+        cap = "Pola beban sehari: 2019 (titik-titik) vs masa COVID-19 (garis tegas)"
+        figp.update_xaxes(title="Jam", dtick=3).update_yaxes(title="MWh")
+
+    elif kondisi == "Normal":
+        judul = f"☀️ Temuan pada masa normal ({T_START:%d %b %Y} – {CS - pd.Timedelta(days=1):%d %b %Y})"
+        A, Bn = T_START, CS - pd.Timedelta(hours=1)
+        grow = (y_all.loc[A:Bn].mean() / y_all.loc[A - YR:Bn - YR].mean() - 1) * 100
+        pw, pe = prof24(A, Bn, False), prof24(A, Bn, True)
+        Xh = DATA.loc[A:Bn]
+        hol = Xh[Xh.holiday == 1].nat_demand.mean()
+        wkd = Xh[(Xh.holiday == 0) & (Xh.index.dayofweek < 5)].nat_demand.mean()
+        Xd = Xh[Xh.index.hour.isin(range(9, 18))]
+        tm = Xd[[c for c in Xd.columns if c.startswith("T2M")]].mean(axis=1)
+        slope = np.polyfit(tm, Xd.nat_demand, 1)[0] if len(Xd) > 50 else np.nan
+        Gn = Gm[Gm.kondisi == "Normal"]
+        temuan += [f"Beban rata-rata <b>{fmt(y_all.loc[A:Bn].mean(), 0)} MWh</b>, {'naik' if grow > 0 else 'turun'} "
+                   f"{fmt(abs(grow), 1)}% dibanding periode yang sama setahun sebelumnya — kebutuhan listrik terus tumbuh.",
+                   f"Puncak hari kerja terjadi sekitar <b>pukul {int(pw.idxmax()):02d}:00</b> ({fmt(pw.max(), 0)} MWh); "
+                   f"akhir pekan {fmt(wk_gap(A, Bn), 0)}% lebih rendah dan hari libur {fmt((1 - hol / wkd) * 100, 0)}% lebih rendah "
+                   f"dari hari kerja.",
+                   f"Siang hari, setiap kenaikan suhu <b>1°C</b> diikuti kenaikan beban ±{fmt(slope, 0)} MWh — pendingin ruangan "
+                   f"menjadi pendorong utama dari variabel cuaca.",
+                   f"Model <b>{short(sel_model)}</b> meleset rata-rata <b>{fmt(m_norm, 2)}%</b>; "
+                   f"{fmt((Gn.ape <= 5).mean() * 100, 0)}% jam ramalannya meleset kurang dari 5%.",
+                   f"Pada kondisi normal, model paling tepat adalah <b>{short(best_here.Model)}</b> "
+                   f"(meleset {fmt(best_here.MAPE, 2)}%)."]
+        own = ok[ok.Keluarga.isin(["Klasik", "Machine Learning", "Deep Learning"])]
+        tlo = ok[ok.Keluarga == "Transfer Learning"]
+        if len(own) and len(tlo):
+            d_ = own.iloc[0].MAPE - tlo.iloc[0].MAPE
+            temuan.append(f"Model yang dilatih sendiri terbaik (<b>{short(own.iloc[0].Model)}</b>, {fmt(own.iloc[0].MAPE, 2)}%) "
+                          + (f"bersaing ketat dengan transfer learning terbaik (<b>{short(tlo.iloc[0].Model)}</b>, "
+                             f"{fmt(tlo.iloc[0].MAPE, 2)}%) — saat pola stabil, data historis sudah cukup untuk belajar."
+                             if abs(d_) <= 0.5 else
+                             f"{'lebih baik' if d_ < 0 else 'tertinggal'} dari transfer learning terbaik "
+                             f"(<b>{short(tlo.iloc[0].Model)}</b>, {fmt(tlo.iloc[0].MAPE, 2)}%)."))
+        for lab, p, c, d in [("Hari kerja", pw, NAVY, None), ("Akhir pekan", pe, "#3f8ae0", None)]:
+            figp.add_trace(go.Scatter(x=p.index, y=p.values, name=lab, line=dict(color=c, width=2.6), hovertemplate="%{y:,.0f} MWh"))
+        ph = Xh[Xh.holiday == 1].groupby(Xh[Xh.holiday == 1].index.hour).nat_demand.mean()
+        figp.add_trace(go.Scatter(x=ph.index, y=ph.values, name="Hari libur", line=dict(color=TEAL, width=2.6),
+                                  hovertemplate="%{y:,.0f} MWh"))
+        cap = "Pola beban sehari pada masa normal"
+        figp.update_xaxes(title="Jam", dtick=3).update_yaxes(title="MWh")
+
+    else:
+        judul = "📊 Temuan pada seluruh periode uji (masa normal + masa COVID-19)"
+        a19, b19 = CS - YR, LAST - YR
+        drop = (1 - y_all.loc[CS:LAST].mean() / y_all.loc[a19:b19].mean()) * 100
+        mm = Gm.groupby("bulan").ape.mean()
+        worst = mm.idxmax()
+        temuan += [f"Model <b>{short(sel_model)}</b> meleset <b>{fmt(m_norm, 2)}%</b> di masa normal dan "
+                   f"<b>{fmt(m_cov, 2)}%</b> di masa COVID-19 — perubahan pola mendadak membuat ramalan "
+                   f"{'lebih sulit' if m_cov > m_norm else 'tetap stabil'}.",
+                   f"Bulan paling sulit diramal: <b>{BULAN[worst.month - 1]} {worst.year}</b> (meleset {fmt(mm.max(), 2)}%).",
+                   f"Saat pandemi, beban listrik turun {fmt(drop, 0)}% dibanding periode yang sama tahun 2019, dan beda hari "
+                   f"kerja–akhir pekan menyempit dari {fmt(wk_gap(a19, b19), 0)}% menjadi {fmt(wk_gap(CS, LAST), 0)}%."]
+        if len(lbr):
+            temuan.append(f"Model paling stabil di kedua kondisi: <b>{short(rob.Model)}</b> "
+                          f"({fmt(rob.MAPE_NORMAL, 2)}% → {fmt(rob.MAPE_COVID, 2)}%).")
+        temuan.append(f"Secara keseluruhan, model paling tepat pada filter ini adalah <b>{short(best_here.Model)}</b> "
+                      f"(meleset {fmt(best_here.MAPE, 2)}%).")
+        figp.add_trace(go.Bar(x=[f"{BULAN[d.month - 1]} {d:%y}" for d in mm.index], y=mm.values,
+                              marker=dict(color=[TEAL if d >= CS.to_period("M").to_timestamp() else BLUE for d in mm.index],
+                                          line=dict(color="#fff", width=1)),
+                              text=[f"{v:.1f}" for v in mm.values], textposition="outside", cliponaxis=False,
+                              hovertemplate="%{x}: %{y:.2f}%<extra></extra>"))
+        cap = f"Rata-rata meleset per bulan · {short(sel_model)} · biru = normal, teal = masa COVID-19"
+        figp.update_yaxes(title="meleset (%)")
+
+    with card(470):
+        head(judul, "Temuan otomatis dari data — berubah sesuai pilihan 'Periode yang dinilai'")
+        cA, cB = st.columns([1.15, 1])
+        with cA:
+            st.markdown('<div class="sum" style="box-shadow:none;border:0;padding:6px 4px;margin:0"><ul>'
+                        + "".join(f"<li>{t}</li>" for t in temuan) + "</ul></div>", unsafe_allow_html=True)
+        with cB:
+            st.markdown(f'<div class="cs" style="margin-top:4px">{cap}</div>', unsafe_allow_html=True)
+            is_bar = not (kondisi.startswith("Masa") or kondisi == "Normal")
+            show(style(figp, 330, legend=not is_bar, unified=not is_bar), "periode")
+
     # ---------- ringkasan utama ----------
     best_now = SC.iloc[0]
     bl = [f"Model <b>{short(BEST)}</b> dipilih sebagai yang terbaik. Ramalannya rata-rata hanya meleset "
