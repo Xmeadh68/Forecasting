@@ -232,9 +232,11 @@ def metrics(y, p):
     m = ~np.isnan(y) & ~np.isnan(p)
     y, p = y[m], p[m]
     if len(y) == 0:
-        return dict(MAE=np.nan, RMSE=np.nan, MAPE=np.nan, BIAS=np.nan)
+        return dict(MAE=np.nan, RMSE=np.nan, MAPE=np.nan, BIAS=np.nan, R2=np.nan)
+    ss_tot = np.sum((y - y.mean()) ** 2)
     return dict(MAE=np.mean(np.abs(y - p)), RMSE=np.sqrt(np.mean((y - p) ** 2)),
-                MAPE=np.mean(np.abs((y - p) / y)) * 100, BIAS=np.mean(p - y))
+                MAPE=np.mean(np.abs((y - p) / y)) * 100, BIAS=np.mean(p - y),
+                R2=1 - np.sum((y - p) ** 2) / ss_tot if ss_tot > 0 else np.nan)
 
 
 def legend_html(pairs):
@@ -357,7 +359,7 @@ TF = filt(TEST)
 def score_table(_tf, key):
     rows = [dict(Model=n, Keluarga=FAM_OF.get(n, "-"), **metrics(g.aktual, g.prediksi)) for n, g in _tf.groupby("model")]
     return pd.DataFrame(rows).sort_values("MAPE").reset_index(drop=True) if rows else pd.DataFrame(
-        columns=["Model", "Keluarga", "MAE", "RMSE", "MAPE", "BIAS"])
+        columns=["Model", "Keluarga", "MAE", "RMSE", "MAPE", "BIAS", "R2"])
 
 
 SC = score_table(TF, (M.get("generated"), BEST, str(rng), kondisi, len(TF)))
@@ -382,8 +384,9 @@ if ms is not None:
     better = (1 - ms.MAE / naive_mae) * 100 if naive_mae == naive_mae else np.nan
     kpi_row([("🤖", "Model dipakai", short(sel_model), FAM_ID.get(FAM_OF[sel_model], "")
               + (" · terbaik" if sel_model == BEST else "") + (" · ⚠️ diduga bocor" if sel_model in SUSPECT else ""), "hl"),
-             ("🎯", "Ketepatan ramalan", f"{fmt(100 - ms.MAPE, 1)}%", f"rata-rata meleset {fmt(ms.MAPE, 2)}%"),
-             ("📏", "Selisih rata-rata", f"±{fmt(ms.MAE, 0)} MWh", "per jam, antara ramalan & kenyataan"),
+             ("🎯", "Ketepatan ramalan", f"{fmt(100 - ms.MAPE, 1)}%", f"MAPE (rata-rata meleset) {fmt(ms.MAPE, 2)}%"),
+             ("📏", "Selisih rata-rata (MAE)", f"±{fmt(ms.MAE, 0)} MWh",
+              f"RMSE {fmt(ms.RMSE, 1)} MWh · R² {fmt(ms.R2, 3)}"),
              ("📈", "Lebih tepat dari cara sederhana", f"{fmt(better, 0)}%" if better == better else "–",
               "dibanding menyalin beban minggu lalu"),
              ("🔝", "Puncak beban besok", f"{fmt(pk.prediksi, 0)} MWh", f"sekitar pukul {pk.datetime:%H:%M}"),
